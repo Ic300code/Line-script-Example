@@ -1,0 +1,259 @@
+local line = {}
+
+-------------------------------------------------------------------------------------------
+
+line.players = {}
+
+local updateCharacter = function(i)
+	
+	local char = line.players[i]
+	local neighbor = line.players[i - 1]
+
+	if not neighbor then
+
+		local j = i - 1
+
+		line.players[j] = char
+		line.players[i] = nil
+
+		local targetCFrame = workspace.Map.Lines:GetChildren()[j].CFrame * CFrame.new(0, 5, 0)
+		local player = game.Players:GetPlayerFromCharacter(char)
+		local human : Humanoid = char.Humanoid
+
+		if player then
+
+			game.ReplicatedStorage.RemoteEvents.Line.MoveToLine:FireClient(player, targetCFrame)
+			game.ReplicatedStorage.RemoteEvents.Line.MoveToLine.OnServerEvent:Wait()
+
+		else
+
+			human:MoveTo(targetCFrame.Position)
+			human.MoveToFinished:Wait()
+
+		end
+
+		if char.HumanoidRootPart:FindFirstChild("AlignOrientation") then
+
+			char.HumanoidRootPart.AlignOrientation.CFrame = workspace.Map.Lines:GetChildren()[j].CFrame
+
+		end
+
+		neighbor = line.players[j - 1]
+
+		if not neighbor and j > 1 then
+
+			UPDATE(j)
+
+		elseif player then
+
+			game.ReplicatedStorage.BindableFunctions.Line.CalculatePrice:Invoke(player, j)
+
+		end
+
+	end
+	
+end
+
+--[[This update the line]]
+local update = function()
+	
+	for index, char in pairs(line.players) do
+		
+		if index > 1 then
+		
+			updateCharacter(index)
+			
+		end
+		
+	end
+	
+	local BOTS = require(game.ReplicatedStorage.Modules.BackEnd.BotsModule)
+	
+	if (#line.players - #game.Players:GetPlayers()) < BOTS.maxBot then
+
+		local max = #line.players
+
+		for i = 1, BOTS.maxBot - #line.players do
+
+			BOTS.createBot(max + i)
+
+		end
+
+	end
+	
+end
+
+--[[This remove a character from the line's list and from the game (it's only for bots)]]
+local remove = function(index)
+	
+	local BOTS = require(game.ReplicatedStorage.Modules.BackEnd.BotsModule)
+	
+	local char = line.players[index]
+	
+	if not char then 
+		
+		update() 
+		
+	end
+	
+	char:Destroy()
+
+	line.players[index] = nil
+	BOTS.bots[index] = nil
+		
+	update()
+	
+	
+end
+
+--[[This is not to be called]]
+local playerRemoving = function(player : Player)
+	
+	update()
+	
+end
+
+--[[This is not to be called]]
+local playerAdded = function(player : Player)
+	
+	local char = player.Character or player.CharacterAdded:Wait()
+	
+	local index = #line.players + 1
+	line.players[index] = char
+	
+	local lines = workspace.Map.Lines
+	
+	game.ReplicatedStorage.BindableFunctions.Line.CalculatePrice:Invoke(player)
+	
+	char:PivotTo(lines:GetChildren()[index].CFrame * CFrame.new(0, 5, 0))
+	
+	local alignRotation = script.Assets.AlignOrientation:Clone()
+	alignRotation.Attachment0 = char.HumanoidRootPart.RootAttachment
+	
+	alignRotation.CFrame = lines:GetChildren()[index].CFrame
+	alignRotation.Parent = char.HumanoidRootPart
+	
+	updateCharacter(index)
+	
+end
+
+--[[This is not to be called]]
+local setup = function()
+	
+	local lines = workspace.Map.Lines
+	
+	for index, part in pairs(lines:GetChildren()) do
+
+		local template = script.Assets.LineTemplate:Clone()
+		template.Parent = part
+
+		template.TextLabel.Text = tostring(index)
+
+	end
+	
+end
+
+-------------------------------------------------------------------------------------------
+
+line.playerAdded = playerAdded
+line.playerRemoving = playerRemoving
+line.setup = setup
+line.remove = remove
+line.update = update
+
+-------------------------------------------------------------------------------------------
+
+local cutLine = function(player : Player)
+
+	local char = player.Character or player.CharacterAdded:Wait()
+	local index = 0
+
+	for i, v in pairs(line.players) do
+
+		if v == player.Character then
+
+			index = i
+
+			break
+
+		end
+
+	end
+	
+	local price = game.ReplicatedStorage.BindableFunctions.Line.CalculatePrice:Invoke(player)
+	
+	task.wait()
+	
+	if price > player.leaderstats.Cash.Value then return end
+	
+	player.leaderstats.Cash.Value -= price
+
+	if index and index > 1 then
+
+		local neighbor = line.players[index - 1]
+		
+		line.players[index - 1] = char
+		line.players[index] = neighbor
+		
+		------------------------------------------------------------------------------------------------------------
+		
+		local sound = workspace.Sounds.MoneySound:Clone()
+		sound.Parent = player.Character.PrimaryPart
+		sound:Destroy()
+		
+		------------------------------------------------------------------------------------------------------------
+		
+		local cframe = workspace.Map.Lines:GetChildren()[index - 1].CFrame * CFrame.new(0, 5, 0)
+		game.ReplicatedStorage.RemoteEvents.Line.MoveToLine:FireClient(player, cframe)
+		
+		game.ReplicatedStorage.BindableFunctions.Line.CalculatePrice:Invoke(player, index - 1)
+		
+		if char.HumanoidRootPart:FindFirstChild("AlignOrientation") then
+
+			char.HumanoidRootPart.AlignOrientation.CFrame = workspace.Map.Lines:GetChildren()[index - 1].CFrame
+
+		end
+		
+		local plr = game.Players:GetPlayerFromCharacter(neighbor)
+		
+		if plr then
+			
+			cframe = workspace.Map.Lines:GetChildren()[index].CFrame * CFrame.new(0, 5, 0)
+
+			game.ReplicatedStorage.RemoteEvents.Line.MoveToLine:FireClient(plr, cframe)
+			game.ReplicatedStorage.BindableFunctions.Line.CalculatePrice:Invoke(plr, index)
+			
+			if neighbor.HumanoidRootPart:FindFirstChild("AlignOrientation") then
+
+				neighbor.HumanoidRootPart.AlignOrientation.CFrame = workspace.Map.Lines:GetChildren()[index].CFrame
+
+			end
+
+		elseif neighbor then
+			
+			local human = neighbor.Humanoid
+			local targetCFrame = workspace.Map.Lines:GetChildren()[index].CFrame * CFrame.new(0, 5, 0)
+
+			human:MoveTo(targetCFrame.Position)
+			
+			if neighbor.HumanoidRootPart:FindFirstChild("AlignOrientation") then
+
+				neighbor.HumanoidRootPart.AlignOrientation.CFrame = workspace.Map.Lines:GetChildren()[index].CFrame
+
+			end
+
+		end
+		
+	end
+
+end
+
+-------------------------------------------------------------------------------------------7
+
+local events = game.ReplicatedStorage.RemoteEvents.Line
+
+events.CutLine.OnServerEvent:Connect(cutLine)
+
+-------------------------------------------------------------------------------------------
+
+return line

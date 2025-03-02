@@ -1,259 +1,401 @@
-local line = {}
+local duel = {}
 
--------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------
 
-line.players = {}
+local BOTS = require(script.Parent.Parent.BotsModule)
 
-local updateCharacter = function(i)
-	
-	local char = line.players[i]
-	local neighbor = line.players[i - 1]
+---------------------------------------------------------------------------------------------------
 
-	if not neighbor then
+local moveDirection = nil
 
-		local j = i - 1
+---------------------------------------------------------------------------------------------------
 
-		line.players[j] = char
-		line.players[i] = nil
+local dieConnection = nil
+local dieConnection2 = nil
 
-		local targetCFrame = workspace.Map.Lines:GetChildren()[j].CFrame * CFrame.new(0, 5, 0)
-		local player = game.Players:GetPlayerFromCharacter(char)
-		local human : Humanoid = char.Humanoid
+---------------------------------------------------------------------------------------------------
 
-		if player then
+local died = false
+local winner = nil
+local loser = nil
 
-			game.ReplicatedStorage.RemoteEvents.Line.MoveToLine:FireClient(player, targetCFrame)
-			game.ReplicatedStorage.RemoteEvents.Line.MoveToLine.OnServerEvent:Wait()
+---------------------------------------------------------------------------------------------------
 
-		else
+duel.remove = function()
 
-			human:MoveTo(targetCFrame.Position)
-			human.MoveToFinished:Wait()
+	local obbyFolder = workspace.Map.Obby.Generated
 
-		end
+	for i, v in pairs(obbyFolder:GetChildren()) do
 
-		if char.HumanoidRootPart:FindFirstChild("AlignOrientation") then
+		if v.Name ~= "Spawn" then
 
-			char.HumanoidRootPart.AlignOrientation.CFrame = workspace.Map.Lines:GetChildren()[j].CFrame
+			v:Destroy()
 
-		end
-
-		neighbor = line.players[j - 1]
-
-		if not neighbor and j > 1 then
-
-			UPDATE(j)
-
-		elseif player then
-
-			game.ReplicatedStorage.BindableFunctions.Line.CalculatePrice:Invoke(player, j)
+			task.wait()
 
 		end
 
 	end
-	
+
 end
 
---[[This update the line]]
-local update = function()
+---------------------------------------------------------------------------------------------------
+
+duel.create = function()
+
+	local obbyFolder = workspace.Map.Obby
+	local presets = script.Presets
+
+	local lastPreset = obbyFolder.Generated.Spawn
+
+	for i = 1, 100 do
+
+		local preset = presets:GetChildren()[math.random(1, #presets:GetChildren())]
+
+		local newPreset = preset:Clone()
+		newPreset.Parent = obbyFolder.Generated
+		newPreset.Name = "Obby"..i
+
+		newPreset:PivotTo(lastPreset.Exit:GetPivot())
+
+		lastPreset = newPreset
+
+		task.wait()
+
+	end
+
+end
+
+---------------------------------------------------------------------------------------------------
+
+duel.setupPlayers = function(dueled, dueler)
+
+	local char = nil
 	
-	for index, char in pairs(line.players) do
+	if dueler:IsA("Player") then
 		
-		if index > 1 then
+		pcall(function()
+
+			dueler.Character.Humanoid.IkControl.Enabled = false
+
+		end)
 		
-			updateCharacter(index)
+		char = dueler.Character
+		
+		char:SetPrimaryPartCFrame(workspace.Map.Obby.Generated.Spawn.Teleport2.CFrame)
+		
+		game.ReplicatedStorage.RemotesEvent.Rounds.Duel.MovePlayer:FireClient(dueler, true)
+		
+	else
+		
+		char = BOTS.createCharacter(workspace.Map.Obby.Generated.Spawn.Teleport2.CFrame)
+		
+		char.Humanoid:Move(Vector3.new(0, 0, -1))
+
+		local chance = 40 ; if dueled:IsA("Player") then chance = 20 end
+
+		BOTS.moveDuel(char.PrimaryPart, chance)
+		
+	end
+
+	local dChar = nil
+	
+	task.wait(.1)
+
+	if dueled:GetAttribute("isBot") then
+
+		dChar = BOTS.createCharacter(workspace.Map.Obby.Generated.Spawn.Teleport1.CFrame)
+
+		dChar.Humanoid:Move(Vector3.new(0, 0, -1))
+		
+		local chance = 40 ; if dueler:IsA("Player") then chance = 20 end
+
+		BOTS.moveDuel(dChar.PrimaryPart, chance)
+
+	else
+		
+		pcall(function()
+			
+			dueled.Character.Humanoid.IkControl.Enabled = false
+			
+		end)
+
+		dChar = dueled.Character
+		
+		dChar:SetPrimaryPartCFrame(workspace.Map.Obby.Generated.Spawn.Teleport1.CFrame)
+
+		game.ReplicatedStorage.RemotesEvent.Rounds.Duel.MovePlayer:FireClient(dueled, true)
+
+	end
+
+	if char and dChar then
+
+		char.Humanoid.WalkSpeed = 16
+		char.Humanoid.JumpPower = 50
+		dChar.Humanoid.WalkSpeed = 16
+		dChar.Humanoid.JumpPower = 50
+
+		moveDirection = game:GetService("RunService"):BindToRenderStep("Move", Enum.RenderPriority.Character.Value, function()
+
+			if (dChar and dChar.PrimaryPart) and (char and char.PrimaryPart) then
+
+				dChar:SetPrimaryPartCFrame(CFrame.new(dChar.PrimaryPart.Position) * CFrame.Angles(0, 0, 0))
+				char:SetPrimaryPartCFrame(CFrame.new(char.PrimaryPart.Position) * CFrame.Angles(0, 0, 0))
+
+			end
+
+		end)
+
+		dieConnection = char.Humanoid.Died:Once(function()
+
+			if not died then
+
+				if dieConnection2 then
+
+					dieConnection2:Disconnect()
+
+				end
+
+				died = true
+
+				warn("player died; winner : "..dueled.Name..", loser : "..dueler.Name)
+
+				winner = dueled
+				loser = dueler
+
+			end
+
+		end)
+
+		dieConnection = dChar.Humanoid.Died:Once(function()
+
+			if not died then
+
+				if dieConnection then
+
+					dieConnection:Disconnect()
+
+				end
+
+				died = true
+
+				warn("player died; winner : "..dueler.Name..", loser : "..dueled.Name)
+
+				winner = dueler
+				loser = dueled
+
+			end
+
+		end)
+
+	end
+
+end
+
+---------------------------------------------------------------------------------------------------
+
+duel.events = function(dueler)
+
+	local dueled = nil
+
+	local players = game.Players:GetPlayers()
+	dueled = game.ReplicatedStorage.InVoting:GetChildren()[math.random(1, #game.ReplicatedStorage.InVoting:GetChildren())]
+	
+	if dueled == dueler then
+		
+		for i = 1, 10 do
+			
+			dueled = game.ReplicatedStorage.InVoting:GetChildren()[math.random(1, #game.ReplicatedStorage.InVoting:GetChildren())]
+			
+			if dueled ~= dueler then
+				
+				break
+				
+			end
 			
 		end
 		
 	end
 	
-	local BOTS = require(game.ReplicatedStorage.Modules.BackEnd.BotsModule)
+	local image = ""
+	local dImage = ""
 	
-	if (#line.players - #game.Players:GetPlayers()) < BOTS.maxBot then
+	if not dueler:GetAttribute("isBot") then
+		
+		dueler = game.Players[dueler.Name]
+		dImage = game.Players:GetUserThumbnailAsync(dueler.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+		
+	else
+		
+		dImage = "rbxassetid://104163217298112"
+		
+	end
 
-		local max = #line.players
+	if dueled == game.ReplicatedStorage.InVoting[dueler.Name] then
 
-		for i = 1, BOTS.maxBot - #line.players do
+		for i = 1, 10 do
 
-			BOTS.createBot(max + i)
+			dueled = game.ReplicatedStorage.InVoting:GetChildren()[math.random(1, #game.ReplicatedStorage.InVoting:GetChildren())]
+
+			if dueled ~= game.ReplicatedStorage.InVoting[dueler.Name] then
+
+				break
+
+			end
 
 		end
 
 	end
-	
-end
 
---[[This remove a character from the line's list and from the game (it's only for bots)]]
-local remove = function(index)
-	
-	local BOTS = require(game.ReplicatedStorage.Modules.BackEnd.BotsModule)
-	
-	local char = line.players[index]
-	
-	if not char then 
-		
-		update() 
-		
+	if dueled:GetAttribute("isBot") then
+
+		image = "rbxassetid://104163217298112"
+
+	else
+
+		dueled = game.Players[dueled.Name]
+		image = game.Players:GetUserThumbnailAsync(dueled.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+
 	end
-	
-	char:Destroy()
 
-	line.players[index] = nil
-	BOTS.bots[index] = nil
-		
-	update()
-	
-	
+	task.wait()
+
+	return dueled, dueler, image, dImage
+
 end
 
---[[This is not to be called]]
-local playerRemoving = function(player : Player)
-	
-	update()
-	
-end
+---------------------------------------------------------------------------------------------------
 
---[[This is not to be called]]
-local playerAdded = function(player : Player)
+duel.setup = function(inf)
 	
-	local char = player.Character or player.CharacterAdded:Wait()
-	
-	local index = #line.players + 1
-	line.players[index] = char
-	
-	local lines = workspace.Map.Lines
-	
-	game.ReplicatedStorage.BindableFunctions.Line.CalculatePrice:Invoke(player)
-	
-	char:PivotTo(lines:GetChildren()[index].CFrame * CFrame.new(0, 5, 0))
-	
-	local alignRotation = script.Assets.AlignOrientation:Clone()
-	alignRotation.Attachment0 = char.HumanoidRootPart.RootAttachment
-	
-	alignRotation.CFrame = lines:GetChildren()[index].CFrame
-	alignRotation.Parent = char.HumanoidRootPart
-	
-	updateCharacter(index)
-	
-end
+	local dueled, dueler, image, dImage = duel.events(inf)
 
---[[This is not to be called]]
-local setup = function()
-	
-	local lines = workspace.Map.Lines
-	
-	for index, part in pairs(lines:GetChildren()) do
+	for index, template in pairs(game.ReplicatedStorage.InVoting:GetChildren()) do
 
-		local template = script.Assets.LineTemplate:Clone()
-		template.Parent = part
+		template:SetAttribute("Health", 3)
 
-		template.TextLabel.Text = tostring(index)
+	end
+
+	died = false
+
+	game.ReplicatedStorage.RemotesEvent.Rounds.DuelStarted:FireAllClients()
+
+	task.delay(2, function()
+
+		workspace.Sounds.Duel:Play()
+
+	end)
+
+	task.wait(5)
+
+	for index, player in pairs(game.Players:GetPlayers()) do
+
+		local gui = game.ReplicatedStorage.Game.RoundGuis.Duel:Clone()
+		gui.Parent = player.PlayerGui
 
 	end
 	
-end
+	task.wait(.25)
+	
+	game.ReplicatedStorage.RemotesEvent.Rounds.Duel.DuelPlayers:FireAllClients(dImage, image)
+	
+	task.wait(5)
 
--------------------------------------------------------------------------------------------
+	duel.create()
+	duel.setupPlayers(dueled, dueler)
 
-line.playerAdded = playerAdded
-line.playerRemoving = playerRemoving
-line.setup = setup
-line.remove = remove
-line.update = update
+	game.ReplicatedStorage.RemotesEvent.Rounds.Duel.Running:FireAllClients()
 
--------------------------------------------------------------------------------------------
+	for i = 1, 100 do
 
-local cutLine = function(player : Player)
-
-	local char = player.Character or player.CharacterAdded:Wait()
-	local index = 0
-
-	for i, v in pairs(line.players) do
-
-		if v == player.Character then
-
-			index = i
+		if died then
 
 			break
 
 		end
 
+		task.wait(1)
+
 	end
-	
-	local price = game.ReplicatedStorage.BindableFunctions.Line.CalculatePrice:Invoke(player)
-	
-	task.wait()
-	
-	if price > player.leaderstats.Cash.Value then return end
-	
-	player.leaderstats.Cash.Value -= price
 
-	if index and index > 1 then
+	if winner and loser then
 
-		local neighbor = line.players[index - 1]
-		
-		line.players[index - 1] = char
-		line.players[index] = neighbor
-		
-		------------------------------------------------------------------------------------------------------------
-		
-		local sound = workspace.Sounds.MoneySound:Clone()
-		sound.Parent = player.Character.PrimaryPart
-		sound:Destroy()
-		
-		------------------------------------------------------------------------------------------------------------
-		
-		local cframe = workspace.Map.Lines:GetChildren()[index - 1].CFrame * CFrame.new(0, 5, 0)
-		game.ReplicatedStorage.RemoteEvents.Line.MoveToLine:FireClient(player, cframe)
-		
-		game.ReplicatedStorage.BindableFunctions.Line.CalculatePrice:Invoke(player, index - 1)
-		
-		if char.HumanoidRootPart:FindFirstChild("AlignOrientation") then
+		local player = game.Players:FindFirstChild(winner.Name)
 
-			char.HumanoidRootPart.AlignOrientation.CFrame = workspace.Map.Lines:GetChildren()[index - 1].CFrame
+		if player and player:IsA("Player") then
 
+			player:LoadCharacter()
+			
+			player.Character.Humanoid.WalkSpeed = 0
+			player.Character.Humanoid.JumpPower = 0
+			
 		end
 		
-		local plr = game.Players:GetPlayerFromCharacter(neighbor)
+		if loser:IsA("Player") then
+			
+			local template = game.ReplicatedStorage.InVoting:FindFirstChild(loser.Name)
+			
+			template:Destroy()
+			
+		else
+			
+			loser:Destroy()
+			
+		end
+
+		loser:SetAttribute("Health", 0)
 		
-		if plr then
+	else
+		
+		local random = math.random(1, 2)
+		local l = {dueler, dueled}
+		
+		loser:Destroy()
+		
+		if l[random]:IsA("Player") then
 			
-			cframe = workspace.Map.Lines:GetChildren()[index].CFrame * CFrame.new(0, 5, 0)
+			local player = game.Players[loser.Name]
 
-			game.ReplicatedStorage.RemoteEvents.Line.MoveToLine:FireClient(plr, cframe)
-			game.ReplicatedStorage.BindableFunctions.Line.CalculatePrice:Invoke(plr, index)
+			local teleportService = game:GetService("TeleportService")
+
+			teleportService:Teleport(
+				72617573585302,
+				game.Players[player.Name],
+				false
+			)
 			
-			if neighbor.HumanoidRootPart:FindFirstChild("AlignOrientation") then
+		end
 
-				neighbor.HumanoidRootPart.AlignOrientation.CFrame = workspace.Map.Lines:GetChildren()[index].CFrame
+	end
 
-			end
+	if moveDirection then
 
-		elseif neighbor then
-			
-			local human = neighbor.Humanoid
-			local targetCFrame = workspace.Map.Lines:GetChildren()[index].CFrame * CFrame.new(0, 5, 0)
+		moveDirection:Disconnect()
 
-			human:MoveTo(targetCFrame.Position)
-			
-			if neighbor.HumanoidRootPart:FindFirstChild("AlignOrientation") then
+	end
 
-				neighbor.HumanoidRootPart.AlignOrientation.CFrame = workspace.Map.Lines:GetChildren()[index].CFrame
+	game.ReplicatedStorage.RemotesEvent.Rounds.Duel.DuelFinished:FireAllClients()
+	
+	task.wait(2.5)
 
-			end
+	for index, player in pairs(game.Players:GetPlayers()) do
+
+		if player.PlayerGui:FindFirstChild("Duel") then
+
+			player.PlayerGui.Duel:Destroy()
 
 		end
-		
+
 	end
+	
+	task.delay(5, function()
+	
+		duel.remove()
+		
+	end)
 
 end
 
--------------------------------------------------------------------------------------------7
+---------------------------------------------------------------------------------------------------
 
-local events = game.ReplicatedStorage.RemoteEvents.Line
-
-events.CutLine.OnServerEvent:Connect(cutLine)
-
--------------------------------------------------------------------------------------------
-
-return line
+return duel
